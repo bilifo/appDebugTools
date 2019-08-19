@@ -5,25 +5,32 @@ import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbEndpoint;
 import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
 import android.text.TextUtils;
 import android.util.Log;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.chrisplus.rootmanager.RootManager;
 import com.chrisplus.rootmanager.container.Result;
-import com.orhanobut.logger.AndroidLogAdapter;
 import com.orhanobut.logger.CsvFormatStrategy;
 import com.orhanobut.logger.DiskLogAdapter;
 import com.orhanobut.logger.FormatStrategy;
@@ -33,12 +40,76 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.text.SimpleDateFormat;
+import java.util.function.ToDoubleFunction;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity{
     TextView tv;
     EditText ed;
     Button bt, bt2, bt3, bt4;
     UsbManager usbManager;
+    Result aa;
+    Switch aSwitch;
+    String usbPath;
+
+    Handler handler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            int value = msg.what;
+            if (value == 1) {
+                handler.removeMessages(1);
+                catchLog();
+                handler.sendEmptyMessageDelayed(1, 1000 * 30);
+            }
+        }
+    };
+    private static final String ACTION_USB_PERMISSION = "com.demo.otgusb.USB_PERMISSION";
+    private UsbManager mUsbManager;
+    private PendingIntent mPermissionIntent;
+    private BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (action == null)
+                return;
+            switch (action) {
+                case ACTION_USB_PERMISSION://用户授权广播
+                    synchronized (this) {
+                        if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) { //允许权限申请
+                        } else {
+                        }
+                    }
+                    break;
+                case UsbManager.ACTION_USB_DEVICE_ATTACHED://USB设备插入广播
+                    // 获取挂载路径, 读取U盘文件
+                    usbPath = intent.getDataString();
+
+                    break;
+                case UsbManager.ACTION_USB_DEVICE_DETACHED://USB设备拔出广播
+                    Toast.makeText(MainActivity.this, "U盘拔出", Toast.LENGTH_SHORT).show();
+                    usbPath = null;
+                    break;
+            }
+        }
+    };
+
+    private void initUSB() {
+        //USB管理器
+        mUsbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
+        mPermissionIntent = PendingIntent.getBroadcast(this, 0, new Intent(ACTION_USB_PERMISSION), 0);
+
+        //注册广播,监听USB插入和拔出
+        IntentFilter intentFilter = new IntentFilter();
+        intentFilter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED);
+        intentFilter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED);
+        intentFilter.addAction(ACTION_USB_PERMISSION);
+        registerReceiver(mUsbReceiver, intentFilter);
+
+        //读写权限
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    Manifest.permission.READ_EXTERNAL_STORAGE}, 111);
+        }
+    }
 
     //
     @Override
@@ -49,7 +120,7 @@ public class MainActivity extends AppCompatActivity {
                         .tag(null)/** */
                         .build();
         Logger.addLogAdapter(new DiskLogAdapter(formatStrategy));
-
+        initUSB();
         setContentView(R.layout.activity_main);
         quanxian6();
         ed = findViewById(R.id.ed);
@@ -58,7 +129,7 @@ public class MainActivity extends AppCompatActivity {
         bt2 = findViewById(R.id.button2);
         bt3 = findViewById(R.id.button3);
         bt4 = findViewById(R.id.button4);
-        Logger.log(Logger.DEBUG, "pjl++", "test", null);
+        aSwitch = findViewById(R.id.switch1);
         //给密集架app设置激活码
         bt.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -70,7 +141,7 @@ public class MainActivity extends AppCompatActivity {
                         String temp1 = EncryptHelper.desEncrypt("kn." + temp);
                         String shpath = "/data/data/com.dense.kuiniu.dense_frame/files/EncryptionCode";
                         Result aa = RootManager.getInstance().runCommand("echo " + "-e " + "\"" + temp1 + "\\c" + "\"" + " > " + shpath);//echo -e表示激活转移字符, 末尾加上\c表示不换行
-//                        RootManager.getInstance().runCommand("chmod -R 666 " + shpath);
+                        RootManager.getInstance().runCommand("chmod -R 666 " + shpath);
                         tv.setText("更新完成 " + temp1);
                     } catch (Exception e) {
                         e.printStackTrace();
@@ -84,16 +155,24 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        //抓取日志
         bt3.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-
+                RootManager.getInstance().runCommand("su");
+                catchLog2();
             }
         });
+        //导出日志到upan
         bt4.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                RootManager.getInstance().runCommand("su");
+                if (usbPath == null) {
+                    Toast.makeText(MainActivity.this, "没有U盘插入", Toast.LENGTH_SHORT).show();
+                } else {
 
+                }
             }
         });
 
@@ -135,6 +214,39 @@ public class MainActivity extends AppCompatActivity {
 //                tv.setText(c.getMessage());
 
 
+            }
+        });
+
+        aSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+            @Override
+            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
+//                if (isChecked) {
+//                    RootManager.getInstance().runCommand("rm -R "+saveLogPath);
+//                    handler.removeMessages(1);
+//                    handler.sendEmptyMessage(1);
+//                } else {
+//                    handler.removeMessages(1);
+//                }
+                if (isChecked) {
+                    RootManager.getInstance().runCommand("rm -R " + saveLogPath);
+                    RootManager.getInstance().runCommand("su");
+
+
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            SimpleDateFormat sDateFormat = new SimpleDateFormat("yyyy_MM_dd_hh_mm_ss");
+
+                            String date = sDateFormat.format(new java.util.Date());
+                            File saveFile = FileUtil.makeFile(saveLogPath + date);
+                            RootManager.getInstance().runCommand("logcat -v time -f " + saveFile.getPath());
+                        }
+                    }).start();
+
+                } else {
+                    RootManager.getInstance().runCommand("su");
+                    RootManager.getInstance().runCommand("logcat -c");
+                }
             }
         });
     }
@@ -254,5 +366,28 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return -1;
+    }
+
+    private final String saveLogPath = "/sdcard/log/";
+
+    private void catchLog() {
+        RootManager.getInstance().runCommand("su");
+        RootManager.getInstance().runCommand("logcat -c");
+        SimpleDateFormat sDateFormat = new SimpleDateFormat("yyyy_MM_dd_hh_mm_ss");
+
+        String date = sDateFormat.format(new java.util.Date());
+        File saveFile = FileUtil.makeFile(saveLogPath + date);
+        RootManager.getInstance().runCommand("logcat -d -v time -f " + saveFile.getPath());
+
+
+    }
+
+    private void catchLog2() {
+        RootManager.getInstance().runCommand("su");
+        SimpleDateFormat sDateFormat = new SimpleDateFormat("yyyy_MM_dd_hh_mm_ss");
+
+        String date = sDateFormat.format(new java.util.Date());
+        File saveFile = FileUtil.makeFile(saveLogPath + date);
+        RootManager.getInstance().runCommand("logcat -d -v time -f " + saveFile.getPath());
     }
 }
